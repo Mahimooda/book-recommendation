@@ -1,0 +1,842 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+import { BookOpen, Loader2, AlertTriangle, Sparkles, Search, Users, Heart, BrainCircuit, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+interface BookPart {
+    title: string;
+    link: string; // Link to the specific part/chapter
+}
+
+interface Book {
+    title: string;
+    author: string;
+    genre: string;
+    ageGroup: string[];
+    themes: string[];
+    cover?: string;
+    description?: string;
+    readLink?: string; // Overall link to the book
+    parts?: BookPart[]; // Array of book parts/chapters
+}
+
+const BookRecommendationApp = () => {
+    const [taste, setTaste] = useState('');
+    const [author, setAuthor] = useState('');
+    const [ageGroup, setAgeGroup] = useState('');
+    const [recommendations, setRecommendations] = useState<Book[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [showMore, setShowMore] = useState(false);
+    const [selectedBook, setSelectedBook] = useState<Book | null>(null);
+
+    // LLM-related states
+    const [generatingSummary, setGeneratingSummary] = useState(false);
+    const [generatedSummary, setGeneratedSummary] = useState<string | null>(null);
+    const [generatingReason, setGeneratingReason] = useState(false);
+    const [generatedReason, setGeneratedReason] = useState<string | null>(null);
+
+    const allBooks: Book[] = [
+        {
+            title: "The Secret History",
+            author: "Donna Tartt",
+            genre: "Mystery",
+            ageGroup: ["adults"],
+            themes: ["friendship", "morality", "dark academia"],
+            cover: "https://i.pinimg.com/564x/c4/47/2a/c4472a57117495558487c9ba57985475.jpg",
+            description: "A classic tale of a group of eccentric classics students at an elite New England college, and the dark secrets they keep. As their studies delve deeper into ancient rituals, a forbidden act leads to a tragic death, forever altering their lives and testing the bonds of their friendship. The novel explores themes of obsession, class, and the corrupting influence of knowledge.",
+            readLink: "https://en.wikipedia.org/wiki/The_Secret_History",
+            parts: [
+                { title: "Chapter 1: The New Beginning", link: "https://en.wikipedia.org/wiki/The_Secret_History#Plot_summary" },
+                { title: "Chapter 2: Unveiling the Past", link: "https://en.wikipedia.org/wiki/The_Secret_History#Characters" },
+                { title: "Chapter 3: The Dark Secret", link: "https://en.wikipedia.org/wiki/The_Secret_History#Themes" },
+            ]
+        },
+        {
+            title: "Pride and Prejudice",
+            author: "Jane Austen",
+            genre: "Romance",
+            ageGroup: ["young adults", "adults"],
+            themes: ["love", "society", "manners"],
+            cover: "https://i.pinimg.com/564x/e3/95/95/e395955a98e999d9b4b0598655745155.jpg",
+            description: "A timeless novel of manners, love, and social class in 19th-century England, following the spirited Elizabeth Bennet as she navigates societal expectations and her complicated relationship with the proud Mr. Darcy. It's a witty commentary on marriage, morality, and the pursuit of happiness.",
+            readLink: "https://www.gutenberg.org/files/1342/1342-h/1342-h.htm",
+            parts: [
+                { title: "Volume 1, Chapter 1", link: "https://www.gutenberg.org/files/1342/1342-h/1342-h.htm#link2H_4_0007" },
+                { title: "Volume 1, Chapter 2", link: "https://www.gutenberg.org/files/1342/1342-h/1342-h.htm#link2H_4_0008" },
+                { title: "Volume 2, Chapter 1", link: "https://www.gutenberg.org/files/1342/1342-h/1342-h.htm#link2H_4_0036" },
+            ]
+        },
+        {
+            title: "Project Hail Mary",
+            author: "Andy Weir",
+            genre: "Science Fiction",
+            ageGroup: ["adults"],
+            themes: ["survival", "discovery", "space", "problem-solving"],
+            cover: "https://i.pinimg.com/564x/97/58/05/97580554c58f4b5b75b9f91a54f15c79.jpg",
+            description: "An astronaut wakes up on a spaceship with no memory of who he is or how he got there, tasked with saving humanity. He must piece together his past and use his scientific ingenuity to complete a desperate mission against impossible odds, all while forming an unlikely bond with an alien ally.",
+            readLink: "https://en.wikipedia.org/wiki/Project_Hail_Mary",
+            parts: [
+                { title: "Part 1: Awakening", link: "https://en.wikipedia.org/wiki/Project_Hail_Mary#Plot" },
+                { title: "Part 2: The Mission", link: "https://en.wikipedia.org/wiki/Project_Hail_Mary#Characters" },
+                { title: "Part 3: The Solution", link: "https://en.wikipedia.org/wiki/Project_Hail_Mary#Reception" },
+            ]
+        },
+        {
+            title: "The House in the Cerulean Sea",
+            author: "T.J. Klune",
+            genre: "Fantasy",
+            ageGroup: ["children", "young adults", "adults"],
+            themes: ["acceptance", "family", "found family", "magic"],
+            cover: "https://i.pinimg.com/564x/49/49/74/4949745588975881188585b98499b955.jpg",
+            description: "A charming and heartwarming story about an orphanage for magical children and the caseworker who learns to love them. Linus Baker is a by-the-book caseworker who is sent to investigate an orphanage for six dangerous magical children, where he discovers the true meaning of family and acceptance.",
+            readLink: "https://en.wikipedia.org/wiki/The_House_in_the_Cerulean_Sea",
+            parts: [
+                { title: "Arrival at Marsyas Island", link: "https://en.wikipedia.org/wiki/The_House_in_the_Cerulean_Sea#Plot" },
+                { title: "The Children of Marsyas", link: "https://en.wikipedia.org/wiki/The_House_in_the_Cerulean_Sea#Characters" },
+                { title: "A Place to Belong", link: "https://en.wikipedia.org/wiki/The_House_in_the_Cerulean_Sea#Themes" },
+            ]
+        },
+        {
+            title: "The Silent Patient",
+            author: "Alex Michaelides",
+            genre: "Thriller",
+            ageGroup: ["adults"],
+            themes: ["psychology", "secrets", "suspense", "mystery"],
+            cover: "https://i.pinimg.com/564x/f1/e8/95/f1e895c7e452445b011419b4b57b989b.jpg",
+            description: "A gripping psychological thriller about a famous painter who shoots her husband and the psychotherapist determined to uncover why. Alicia Berenson's refusal to speak about the murder turns the case into a media sensation, and Theo Faber, a criminal psychotherapist, becomes obsessed with unraveling her motive.",
+            readLink: "https://en.wikipedia.org/wiki/The_Silent_Patient",
+            parts: [
+                { title: "Part 1: Alicia", link: "https://en.wikipedia.org/wiki/The_Silent_Patient#Plot_summary" },
+                { title: "Part 2: Theo", link: "https://en.wikipedia.org/wiki/The_Silent_Patient#Characters" },
+                { title: "Part 3: The Truth", link: "https://en.wikipedia.org/wiki/The_Silent_Patient#Reception" },
+            ]
+        },
+        {
+            title: "Little Fires Everywhere",
+            author: "Celeste Ng",
+            genre: "Fiction",
+            ageGroup: ["adults"],
+            themes: ["family", "class", "motherhood", "secrets"],
+            cover: "https://i.pinimg.com/564x/1e/89/55/1e89552199f187515085609349419b9b.jpg",
+            description: "A compelling story exploring the weight of secrets, the nature of art and identity, and the ferocious pull of motherhood. It follows the intertwined fates of the picture-perfect Richardson family and an enigmatic mother-daughter duo who upend their lives.",
+            readLink: "https://en.wikipedia.org/wiki/Little_Fires_Everywhere",
+            parts: [
+                { title: "Chapter 1: The Arrival", link: "https://en.wikipedia.org/wiki/Little_Fires_Everywhere#Plot" },
+                { title: "Chapter 2: The Custody Battle", link: "https://en.wikipedia.org/wiki/Little_Fires_Everywhere#Characters" },
+                { title: "Chapter 3: The Fire", link: "https://en.wikipedia.org/wiki/Little_Fires_Everywhere#Themes" },
+            ]
+        },
+        {
+            title: "Circe",
+            author: "Madeline Miller",
+            genre: "Mythology",
+            ageGroup: ["young adults", "adults"],
+            themes: ["identity", "transformation", "gods", "feminism"],
+            cover: "https://i.pinimg.com/564x/08/1e/44/081e449818784d5f470a79c974b78a98.jpg",
+            description: "A vivid retelling of the Greek myth of Circe, the goddess of magic, as she navigates a world of gods and mortals. Born a nymph, she discovers her power of witchcraft and is banished to a solitary island, where she hones her abilities and encounters many famous figures from Greek mythology.",
+            readLink: "https://en.wikipedia.org/wiki/Circe_(novel)",
+            parts: [
+                { title: "Part 1: The Island", link: "https://en.wikipedia.org/wiki/Circe_(novel)#Plot" },
+                { title: "Part 2: Encounters", link: "https://en.wikipedia.org/wiki/Circe_(novel)#Characters" },
+                { title: "Part 3: Her Own Path", link: "https://en.wikipedia.org/wiki/Circe_(novel)#Themes" },
+            ]
+        },
+        {
+            title: "Educated",
+            author: "Tara Westover",
+            genre: "Memoir",
+            ageGroup: ["adults"],
+            themes: ["resilience", "education", "family", "self-discovery"],
+            cover: "https://i.pinimg.com/564x/b8/95/74/b895747b9f561996991799986d445a4a.jpg",
+            description: "A powerful memoir about a young woman's journey from a fundamentalist upbringing in rural Idaho to Cambridge University. Tara Westover recounts her struggle for education, battling against her family's strict beliefs and her own self-doubt to forge a new path.",
+            readLink: "https://en.wikipedia.org/wiki/Educated_(book)",
+            parts: [
+                { title: "Chapter 1: Childhood", link: "https://en.wikipedia.org/wiki/Educated_(book)#Synopsis" },
+                { title: "Chapter 2: The Journey to Education", link: "https://en.wikipedia.org/wiki/Educated_(book)#Themes" },
+                { title: "Chapter 3: Finding Her Voice", link: "https://en.wikipedia.org/wiki/Educated_(book)#Reception" },
+            ]
+        },
+        {
+            title: "The Great Gatsby",
+            author: "F. Scott Fitzgerald",
+            genre: "Classic",
+            ageGroup: ["high school", "young adults", "adults"],
+            themes: ["wealth", "love", "loss", "American dream"],
+            cover: "https://i.pinimg.com/564x/75/c6/87/75c687f82785177f154179979b4fcb5f.jpg",
+            description: "A classic American novel depicting the Jazz Age, exploring themes of wealth, love, and the elusive American Dream. It follows the mysterious millionaire Jay Gatsby and his unrequited love for the beautiful Daisy Buchanan, set against the backdrop of lavish parties and moral decay.",
+            readLink: "https://www.gutenberg.org/files/64317/64317-h/64317-h.htm",
+            parts: [
+                { title: "Chapter 1", link: "https://www.gutenberg.org/files/64317/64317-h/64317-h.htm#chap01" },
+                { title: "Chapter 2", link: "https://www.gutenberg.org/files/64317/64317-h/64317-h.htm#chap02" },
+                { title: "Chapter 3", link: "https://www.gutenberg.org/files/64317/64317-h/64317-h.htm#chap03" },
+            ]
+        },
+        {
+            title: "To Kill a Mockingbird",
+            author: "Harper Lee",
+            genre: "Classic",
+            ageGroup: ["middle school", "high school", "young adults", "adults"],
+            themes: ["justice", "racism", "childhood", "morality"],
+            cover: "https://i.pinimg.com/564x/72/17/75/721775f09c947c69f59998189b847e94.jpg",
+            description: "A timeless story about racial injustice and the loss of innocence in the American South, told through the eyes of a young girl, Scout Finch. Her father, Atticus Finch, defends a Black man falsely accused of rape, exposing the deep-seated prejudices of their community.",
+            readLink: "https://en.wikipedia.org/wiki/To_Kill_a_Mockingbird",
+            parts: [
+                { title: "Part 1, Chapter 1", link: "https://en.wikipedia.org/wiki/To_Kill_a_Mockingbird#Plot" },
+                { title: "Part 1, Chapter 2", link: "https://en.wikipedia.org/wiki/To_Kill_a_Mockingbird#Characters" },
+                { title: "Part 2, Chapter 1", link: "https://en.wikipedia.org/wiki/To_Kill_a_Mockingbird#Themes" },
+            ]
+        },
+        {
+            title: "1984",
+            author: "George Orwell",
+            genre: "Dystopian",
+            ageGroup: ["adults"],
+            themes: ["totalitarianism", "surveillance", "freedom", "control"],
+            cover: "https://i.pinimg.com/564x/87/18/25/871825129918549925765799996d9158.jpg",
+            description: "A chilling dystopian novel depicting a totalitarian future where individuality is suppressed and thought is controlled by the omnipresent Party and its leader, Big Brother. Winston Smith, a low-ranking member of the Party, secretly rebels against the oppressive regime.",
+            readLink: "https://www.gutenberg.org/files/1984/1984-h/1984-h.htm",
+            parts: [
+                { title: "Part 1", link: "https://www.gutenberg.org/files/1984/1984-h/1984-h.htm#link2H_4_0005" },
+                { title: "Part 2", link: "https://www.gutenberg.org/files/1984/1984-h/1984-h.htm#link2H_4_0006" },
+                { title: "Part 3", link: "https://www.gutenberg.org/files/1984/1984-h/1984-h.htm#link2H_4_0007" },
+            ]
+        },
+        {
+            title: "The Lord of the Rings",
+            author: "J.R.R. Tolkien",
+            genre: "Fantasy",
+            ageGroup: ["young adults", "adults"],
+            themes: ["good vs evil", "fellowship", "courage", "epic journey"],
+            cover: "https://i.pinimg.com/564x/07/71/27/0771275997235215757b325517551984.jpg",
+            description: "An epic high-fantasy adventure following a hobbit's quest to destroy a powerful ring and save Middle-earth from the Dark Lord Sauron. Frodo Baggins, accompanied by a fellowship of diverse companions, embarks on a perilous journey to Mordor, the heart of Sauron's domain.",
+            readLink: "https://en.wikipedia.org/wiki/The_Lord_of_the_Rings",
+            parts: [
+                { title: "The Fellowship of the Ring", link: "https://en.wikipedia.org/wiki/The_Fellowship_of_the_Ring" },
+                { title: "The Two Towers", link: "https://en.wikipedia.org/wiki/The_Two_Towers" },
+                { title: "The Return of the King", link: "https://en.wikipedia.org/wiki/The_Return_of_the_King" },
+            ]
+        },
+        {
+            title: "Charlotte's Web",
+            author: "E.B. White",
+            genre: "Children's Literature",
+            ageGroup: ["children"],
+            themes: ["friendship", "life", "death", "farm life"],
+            cover: "https://i.pinimg.com/564x/d1/29/14/d129148881478174791557554902a945.jpg",
+            description: "A beloved children's classic about the unlikely friendship between a pig named Wilbur and a spider named Charlotte. When Wilbur's life is in danger, Charlotte devises a plan to save him through her clever web-spinning messages.",
+            readLink: "https://en.wikipedia.org/wiki/Charlotte%27s_Web",
+            parts: [
+                { title: "Chapter 1: Before Breakfast", link: "https://en.wikipedia.org/wiki/Charlotte%27s_Web#Plot_summary" },
+                { title: "Chapter 2: Wilbur", link: "https://en.wikipedia.org/wiki/Charlotte%27s_Web#Characters" },
+                { title: "Chapter 3: Escape", link: "https://en.wikipedia.org/wiki/Charlotte%27s_Web#Themes" },
+            ]
+        },
+        {
+            title: "Harry Potter and the Sorcerer's Stone",
+            author: "J.K. Rowling",
+            genre: "Fantasy",
+            ageGroup: ["children", "middle school", "young adults"],
+            themes: ["magic", "friendship", "good vs evil", "school life"],
+            cover: "https://i.pinimg.com/564x/75/74/d3/7574d32b56e9c991897c419168928b99.jpg",
+            description: "The first book in the iconic series, introducing Harry Potter to the magical world of Hogwarts and his destiny. An orphan living with his cruel aunt and uncle, Harry discovers on his eleventh birthday that he is a wizard and is invited to study at Hogwarts School of Witchcraft and Wizardry.",
+            readLink: "https://en.wikipedia.org/wiki/Harry_Potter_and_the_Philosopher%27s_Stone",
+            parts: [
+                { title: "Chapter 1: The Boy Who Lived", link: "https://en.wikipedia.200/wiki/Harry_Potter_and_the_Philosopher%27s_Stone#Plot" },
+                { title: "Chapter 2: The Vanishing Glass", link: "https://en.wikipedia.org/wiki/Harry_Potter_and_the_Philosopher%27s_Stone#Characters" },
+                { title: "Chapter 3: The Letters from No One", link: "https://en.wikipedia.org/wiki/Harry_Potter_and_the_Philosopher%27s_Stone#Themes" },
+            ]
+        },
+        {
+            title: "The Hobbit",
+            author: "J.R.R. Tolkien",
+            genre: "Fantasy",
+            ageGroup: ["children", "middle school", "young adults"],
+            themes: ["adventure", "courage", "good vs evil", "dragons"],
+            cover: "https://i.pinimg.com/564x/57/5d/15/575d1580559f9f4b5157d99597529b35.jpg",
+            description: "A classic fantasy novel following the hobbit Bilbo Baggins on an unexpected journey to reclaim a treasure guarded by a dragon. Bilbo is swept into an epic quest by the wizard Gandalf and a company of dwarves, encountering trolls, goblins, and the enigmatic creature Gollum.",
+            readLink: "https://en.wikipedia.org/wiki/The_Hobbit",
+            parts: [
+                { title: "Chapter 1: An Unexpected Party", link: "https://en.wikipedia.org/wiki/The_Hobbit#Plot" },
+                { title: "Chapter 2: Roast Mutton", link: "https://en.wikipedia.org/wiki/The_Hobbit#Characters" },
+                { title: "Chapter 3: A Short Rest", link: "https://en.wikipedia.org/wiki/The_Hobbit#Themes" },
+            ]
+        }
+    ];
+
+    const recommendBooks = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        setRecommendations([]);
+        setShowMore(false);
+        setSelectedBook(null); // Close modal on new search
+
+        // Reset LLM generated content
+        setGeneratedSummary(null);
+        setGeneratedReason(null);
+
+        try {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+
+            const tasteArray = taste.toLowerCase().split(',').map((item) => item.trim()).filter((item) => item !== '');
+            const authorPreference = author.trim().toLowerCase();
+            const ageGroupPreference = ageGroup.toLowerCase().trim();
+
+            const filteredBooks = allBooks.filter((book) => {
+                const tasteMatch = tasteArray.length === 0 || tasteArray.some((t) => book.genre.toLowerCase().includes(t));
+                const authorMatch = !authorPreference || book.author.toLowerCase().includes(authorPreference);
+                const ageGroupMatch = !ageGroupPreference || book.ageGroup.includes(ageGroupPreference);
+
+                return tasteMatch && authorMatch && ageGroupMatch;
+            });
+
+            let numRecommendations = Math.min(6, filteredBooks.length); // Show more initial results
+            let randomRecommendations = filteredBooks.sort(() => 0.5 - Math.random()).slice(0, numRecommendations);
+
+            setRecommendations(randomRecommendations);
+        } catch (err: any) {
+            setError(err.message || 'Something went wrong while finding books.');
+        } finally {
+            setLoading(false);
+        }
+    }, [taste, author, ageGroup, allBooks]);
+
+    useEffect(() => {
+        // Reset LLM generated content when modal is closed
+        if (!selectedBook) {
+            setGeneratedSummary(null);
+            setGeneratedReason(null);
+        }
+    }, [selectedBook]);
+
+    const displayedRecommendations = showMore ? recommendations : recommendations.slice(0, 6);
+
+    const handleBookClick = (book: Book) => {
+        setSelectedBook(book);
+    };
+
+    const handleCloseModal = () => {
+        setSelectedBook(null);
+    };
+
+    const handlePartClick = (link: string) => {
+        window.open(link, '_blank'); // Open the part link in a new tab
+    };
+
+    const handleGenerateSummary = useCallback(async () => {
+        if (!selectedBook || !selectedBook.description) {
+            setGeneratedSummary("No description available to summarize.");
+            return;
+        }
+
+        setGeneratingSummary(true);
+        setGeneratedSummary(null); // Clear previous summary
+
+        try {
+            const prompt = `Summarize the following book description concisely in 2-3 sentences:\n\n"${selectedBook.description}"`;
+            let chatHistory = [];
+            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            const payload = { contents: chatHistory };
+            const apiKey = ""; // If you want to use models other than gemini-2.0-flash or imagen-3.0-generate-002, provide an API key here. Otherwise, leave this as-is.
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+            if (result.candidates && result.candidates.length > 0 &&
+                result.candidates[0].content && result.candidates[0].content.parts &&
+                result.candidates[0].content.parts.length > 0) {
+                const text = result.candidates[0].content.parts[0].text;
+                setGeneratedSummary(text);
+            } else {
+                setGeneratedSummary("Could not generate summary. Please try again.");
+            }
+        } catch (err) {
+            console.error("Error generating summary:", err);
+            setGeneratedSummary("Error generating summary. Please try again.");
+        } finally {
+            setGeneratingSummary(false);
+        }
+    }, [selectedBook]);
+
+    const handleGenerateReason = useCallback(async () => {
+        if (!selectedBook) {
+            setGeneratedReason("No book selected to generate a reason.");
+            return;
+        }
+
+        setGeneratingReason(true);
+        setGeneratedReason(null); // Clear previous reason
+
+        try {
+            const userPreferences = `User's preferences:\nGenre: ${taste || 'Any'}\nAuthor: ${author || 'Any'}\nAge Group: ${ageGroup || 'Any'}`;
+            const bookDetails = `Book: "${selectedBook.title}" by ${selectedBook.author} (${selectedBook.genre}, Age Group: ${selectedBook.ageGroup.join(', ')}). Description: "${selectedBook.description}"`;
+            const prompt = `Explain why this book is a good recommendation for the user based on their preferences. Be concise and encouraging.
+            \n\n${userPreferences}\n\n${bookDetails}\n\nReason:`;
+
+            let chatHistory = [];
+            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            const payload = { contents: chatHistory };
+            const apiKey = ""; // If you want to use models other than gemini-2.0-flash or imagen-3.0-generate-002, provide an API key here. Otherwise, leave this as-is.
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+            if (result.candidates && result.candidates.length > 0 &&
+                result.candidates[0].content && result.candidates[0].content.parts &&
+                result.candidates[0].content.parts.length > 0) {
+                const text = result.candidates[0].content.parts[0].text;
+                setGeneratedReason(text);
+            } else {
+                setGeneratedReason("Could not generate reason. Please try again.");
+            }
+        } catch (err) {
+            console.error("Error generating reason:", err);
+            setGeneratedReason("Error generating reason. Please try again.");
+        } finally {
+            setGeneratingReason(false);
+        }
+    }, [selectedBook, taste, author, ageGroup]);
+
+
+    return (
+        <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 p-4 sm:p-8 font-['Inter']">
+            <div className="max-w-4xl mx-auto space-y-10">
+                <motion.h1
+                    initial={{ opacity: 0, y: -30 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, ease: "easeOut" }}
+                    className="text-5xl sm:text-6xl md:text-7xl font-bold text-center text-gray-800 tracking-tight flex flex-col items-center justify-center
+                               bg-gradient-to-r from-teal-400 via-blue-500 to-purple-600 text-transparent bg-clip-text
+                               drop-shadow-xl font-['Playfair_Display']"
+                >
+                    <BookOpen className="mb-4 w-16 h-16 sm:w-20 sm:h-20 text-blue-500 animate-fade-in-up" />
+                    <span className="leading-tight">
+                        Find Your Next Book
+                    </span>
+                    <Sparkles className="mt-4 w-10 h-10 sm:w-12 sm:h-12 text-yellow-400 animate-spin-slow" />
+                </motion.h1>
+
+                <Card className="shadow-2xl border-white/40 bg-white/60 backdrop-blur-xl
+                               transition-all duration-700 hover:scale-[1.01] hover:shadow-pink-300/60
+                               border rounded-3xl p-6">
+                    <CardHeader className="space-y-4">
+                        <CardTitle className="text-3xl sm:text-4xl text-gray-700 flex items-center justify-center
+                                       bg-gradient-to-r from-pink-500 to-purple-600 text-transparent bg-clip-text
+                                       font-['Playfair_Display'] text-center">
+                            <Search className="mr-4 w-8 h-8 sm:w-10 sm:h-10 text-pink-400 animate-pulse-slow" />
+                            <span className="leading-snug">
+                                Find Your Perfect Book
+                            </span>
+                        </CardTitle>
+                        <p className="text-gray-600 text-lg text-center max-w-2xl mx-auto">
+                            Tell us what you like, and we'll find books for you.
+                        </p>
+                    </CardHeader>
+                    <CardContent className="space-y-8 mt-8">
+                        <div className="space-y-6">
+                            <div>
+                                <label htmlFor="taste" className="block text-xl font-medium text-gray-700 mb-3">
+                                    What kind of books do you like? (Genres)
+                                </label>
+                                <Input
+                                    id="taste"
+                                    type="text"
+                                    placeholder="e.g., Mystery, Romance, Sci-Fi"
+                                    value={taste}
+                                    onChange={(e) => setTaste(e.target.value)}
+                                    className="w-full bg-white/80 backdrop-blur-md border-purple-300/70 focus:ring-purple-500 focus:border-purple-500
+                                               text-gray-800 placeholder:text-gray-500 rounded-xl py-4 text-lg shadow-inner"
+                                />
+                            </div>
+                            <div>
+                                <label htmlFor="author" className="block text-xl font-medium text-gray-700 mb-3">
+                                    Any favorite authors? (Optional)
+                                </label>
+                                <Input
+                                    id="author"
+                                    type="text"
+                                    placeholder="e.g., J.K. Rowling, Agatha Christie"
+                                    value={author}
+                                    onChange={(e) => setAuthor(e.target.value)}
+                                    className="w-full bg-white/80 backdrop-blur-md border-purple-300/70 focus:ring-purple-500 focus:border-purple-500
+                                               text-gray-800 placeholder:text-gray-500 rounded-xl py-4 text-lg shadow-inner"
+                                />
+                            </div>
+                            <div>
+                                <label htmlFor="ageGroup" className="block text-xl font-medium text-gray-700 mb-3">
+                                    Who is this for? (Age Group)
+                                </label>
+                                <Input
+                                    id="ageGroup"
+                                    type="text"
+                                    placeholder="e.g., children, young adults, adults"
+                                    value={ageGroup}
+                                    onChange={(e) => setAgeGroup(e.target.value)}
+                                    className="w-full bg-white/80 backdrop-blur-md border-purple-300/70 focus:ring-purple-500 focus:border-purple-500
+                                               text-gray-800 placeholder:text-gray-500 rounded-xl py-4 text-lg shadow-inner"
+                                />
+                            </div>
+                        </div>
+                        <motion.div
+                            whileHover={{ scale: 1.05, boxShadow: "0 10px 20px rgba(168, 85, 247, 0.4)" }}
+                            whileTap={{ scale: 0.98 }}
+                            transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                            className="w-full"
+                        >
+                            <Button
+                                onClick={recommendBooks}
+                                disabled={loading}
+                                className={cn(
+                                    "w-full bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold py-5 px-8 rounded-full transition-all duration-500",
+                                    "shadow-lg hover:shadow-xl",
+                                    "focus:outline-none focus:ring-4 focus:ring-purple-300 focus:ring-opacity-70",
+                                    "border-2 border-white/30 text-2xl font-['Amatic_SC']",
+                                    loading && "opacity-70 cursor-not-allowed"
+                                )}
+                            >
+                                {loading ? (
+                                    <>
+                                        <Loader2 className="mr-4 h-7 w-7 animate-spin" />
+                                        Finding Books...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Search className="mr-4 w-7 h-7" />
+                                        Get Recommendations
+                                    </>
+                                )}
+                            </Button>
+                        </motion.div>
+                    </CardContent>
+                </Card>
+
+                <AnimatePresence>
+                    {error && (
+                        <motion.div
+                            initial={{ opacity: 0, y: -20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                            transition={{ duration: 0.6, type: "spring", stiffness: 100 }}
+                        >
+                            <Card className="bg-red-50 border-red-200 shadow-lg border-2 border-red-200/50 rounded-xl p-4">
+                                <CardHeader>
+                                    <CardTitle className="text-red-600 flex items-center text-xl">
+                                        <AlertTriangle className="mr-3 h-7 w-7" />
+                                        Something went wrong!
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <p className="text-red-700 text-lg">{error}</p>
+                                </CardContent>
+                            </Card>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                <AnimatePresence>
+                    {recommendations.length > 0 && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 40 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 1, delay: 0.4, type: "spring", stiffness: 70 }}
+                        >
+                            <Card className="shadow-2xl border-white/40 bg-white/60 backdrop-blur-xl
+                                           border rounded-3xl p-6">
+                                <CardHeader>
+                                    <CardTitle className="text-3xl sm:text-4xl text-gray-700 flex items-center justify-center
+                                                   bg-gradient-to-r from-orange-400 to-yellow-500 text-transparent bg-clip-text
+                                                   font-['Playfair_Display'] text-center">
+                                        <Sparkles className="mr-3 w-8 h-8 sm:w-10 sm:h-10 text-yellow-400 animate-pulse-slow" />
+                                        Your Recommended Books:
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+                                        {displayedRecommendations.map((book, index) => (
+                                            <motion.div
+                                                key={index}
+                                                className="p-5 bg-white/95 backdrop-blur-md rounded-xl border border-white/20 flex flex-col items-center justify-start
+                                                           transition-all duration-500 hover:scale-[1.05] hover:shadow-xl hover:border-pink-300/50
+                                                           text-center cursor-pointer relative overflow-hidden group"
+                                                variants={{
+                                                    hidden: { opacity: 0, y: 30, rotate: -2 + Math.random() * 4 },
+                                                    visible: { opacity: 1, y: 0, rotate: 0 },
+                                                }}
+                                                whileHover={{ y: -5 }}
+                                                onClick={() => handleBookClick(book)}
+                                            >
+                                                {/* Removed the img tag for book posters from the main grid */}
+                                                <h3 className="text-2xl font-bold text-gray-800 flex flex-col items-center justify-center font-['Playfair_Display'] leading-tight mb-2">
+                                                    {book.title}
+                                                </h3>
+                                                <p className="text-gray-600 text-base mb-1">By {book.author}</p>
+                                                <p className="text-gray-500 text-sm mb-2">Genre: <span className="font-semibold text-purple-500">{book.genre}</span></p>
+
+                                                <div className="flex flex-wrap justify-center gap-2 mb-3">
+                                                    {book.ageGroup.includes("children") && <span className="text-sm bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full flex items-center"><Users className="mr-1 w-4 h-4" />Kids</span>}
+                                                    {book.ageGroup.includes("young adults") && <span className="text-sm bg-pink-100 text-pink-700 px-3 py-1 rounded-full flex items-center"><Heart className="mr-1 w-4 h-4" />YA</span>}
+                                                    {book.ageGroup.includes("adults") && <span className="text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded-full flex items-center"><BrainCircuit className="mr-1 w-4 h-4" />Adults</span>}
+                                                </div>
+
+                                                {book.themes && book.themes.length > 0 && (
+                                                    <div className="flex flex-wrap justify-center gap-1 mt-2 opacity-80 group-hover:opacity-100 transition-opacity duration-300">
+                                                        {book.themes.map((theme, themeIndex) => (
+                                                            <span key={themeIndex} className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full shadow-sm">
+                                                                #{theme}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </motion.div>
+                                        ))}
+                                    </div>
+                                    {recommendations.length > 6 && (
+                                        <div className="mt-10 flex justify-center">
+                                            <motion.div
+                                                whileHover={{ scale: 1.05 }}
+                                                whileTap={{ scale: 0.95 }}
+                                            >
+                                                <Button
+                                                    variant="outline"
+                                                    onClick={() => setShowMore(!showMore)}
+                                                    className="text-purple-600 hover:text-white hover:bg-purple-500
+                                                              transition-all duration-300 rounded-full px-10 py-4
+                                                              border-purple-400/70 flex items-center font-['Amatic_SC'] text-2xl
+                                                              border-2 shadow-md hover:shadow-lg"
+                                                >
+                                                    {showMore ? 'Show Less' : 'Show More Books'}
+                                                </Button>
+                                            </motion.div>
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                {/* Book Details Modal */}
+                <AnimatePresence>
+                    {selectedBook && (
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.8 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.8 }}
+                            transition={{ type: "spring", stiffness: 200, damping: 25 }}
+                            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+                        >
+                            <Card className="relative bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                                <Button
+                                    onClick={handleCloseModal}
+                                    className="absolute top-4 right-4 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-full p-2"
+                                >
+                                    <X className="w-6 h-6" />
+                                </Button>
+                                <CardContent className="flex flex-col md:flex-row items-center md:items-start gap-6">
+                                    {selectedBook.cover && (
+                                        <img
+                                            src={selectedBook.cover}
+                                            alt={`${selectedBook.title} cover`}
+                                            className="w-48 h-auto rounded-lg shadow-lg border border-gray-200 flex-shrink-0"
+                                        />
+                                    )}
+                                    <div className="text-center md:text-left flex-grow">
+                                        <h2 className="text-3xl font-bold text-gray-800 mb-2 font-['Playfair_Display']">
+                                            {selectedBook.title}
+                                        </h2>
+                                        <p className="text-xl text-gray-700 mb-2">By {selectedBook.author}</p>
+                                        <p className="text-lg text-gray-600 mb-3">Genre: <span className="font-semibold text-purple-600">{selectedBook.genre}</span></p>
+
+                                        <div className="flex flex-wrap justify-center md:justify-start gap-2 mb-4">
+                                            {selectedBook.ageGroup.includes("children") && <span className="text-base bg-yellow-100 text-yellow-700 px-4 py-1 rounded-full flex items-center"><Users className="mr-1 w-5 h-5" />Kids</span>}
+                                            {selectedBook.ageGroup.includes("young adults") && <span className="text-base bg-pink-100 text-pink-700 px-4 py-1 rounded-full flex items-center"><Heart className="mr-1 w-5 h-5" />YA</span>}
+                                            {selectedBook.ageGroup.includes("adults") && <span className="text-base bg-blue-100 text-blue-700 px-4 py-1 rounded-full flex items-center"><BrainCircuit className="mr-1 w-5 h-5" />Adults</span>}
+                                        </div>
+
+                                        {selectedBook.themes && selectedBook.themes.length > 0 && (
+                                            <div className="flex flex-wrap justify-center md:justify-start gap-2 mb-4">
+                                                {selectedBook.themes.map((theme, themeIndex) => (
+                                                    <span key={themeIndex} className="text-sm bg-purple-100 text-purple-700 px-3 py-1 rounded-full shadow-sm">
+                                                        #{theme}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        {selectedBook.description && (
+                                            <p className="text-gray-700 text-base leading-relaxed mt-4 mb-6">
+                                                {selectedBook.description}
+                                            </p>
+                                        )}
+
+                                        {/* LLM Features */}
+                                        <div className="mt-6 space-y-4">
+                                            <Button
+                                                onClick={handleGenerateSummary}
+                                                disabled={generatingSummary}
+                                                className={cn(
+                                                    "w-full bg-gradient-to-r from-green-500 to-teal-600 text-white font-bold py-3 px-6 rounded-full",
+                                                    "transition-all duration-300 hover:scale-105 hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-green-300",
+                                                    generatingSummary && "opacity-70 cursor-not-allowed"
+                                                )}
+                                            >
+                                                {generatingSummary ? (
+                                                    <>
+                                                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                                        Summarizing...
+                                                    </>
+                                                ) : (
+                                                    "✨ Summarize Book"
+                                                )}
+                                            </Button>
+                                            {generatedSummary && (
+                                                <motion.p
+                                                    initial={{ opacity: 0, y: 10 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    className="bg-gray-50 p-4 rounded-lg text-gray-800 text-sm italic border border-gray-200"
+                                                >
+                                                    {generatedSummary}
+                                                </motion.p>
+                                            )}
+
+                                            <Button
+                                                onClick={handleGenerateReason}
+                                                disabled={generatingReason}
+                                                className={cn(
+                                                    "w-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-6 rounded-full",
+                                                    "transition-all duration-300 hover:scale-105 hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-indigo-300",
+                                                    generatingReason && "opacity-70 cursor-not-allowed"
+                                                )}
+                                            >
+                                                {generatingReason ? (
+                                                    <>
+                                                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                                        Explaining...
+                                                    </>
+                                                ) : (
+                                                    "✨ Why This Book For Me?"
+                                                )}
+                                            </Button>
+                                            {generatedReason && (
+                                                <motion.p
+                                                    initial={{ opacity: 0, y: 10 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    className="bg-gray-50 p-4 rounded-lg text-gray-800 text-sm italic border border-gray-200"
+                                                >
+                                                    {generatedReason}
+                                                </motion.p>
+                                            )}
+                                        </div>
+
+                                        {selectedBook.parts && selectedBook.parts.length > 0 && (
+                                            <div className="mt-6">
+                                                <h3 className="text-xl font-bold text-gray-800 mb-3 font-['Playfair_Display']">
+                                                    Book Parts:
+                                                </h3>
+                                                <ul className="space-y-2 text-left">
+                                                    {selectedBook.parts.map((part, partIndex) => (
+                                                        <li key={partIndex}>
+                                                            <a
+                                                                href={part.link}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="text-blue-600 hover:text-blue-800 hover:underline transition-colors duration-200 text-lg"
+                                                            >
+                                                                {part.title}
+                                                            </a>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+
+                                        {selectedBook.readLink && !selectedBook.parts && ( // Only show "Continue Reading" if no specific parts are defined
+                                            <div className="mt-6 text-center md:text-left">
+                                                <a
+                                                    href={selectedBook.readLink}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="inline-flex items-center justify-center bg-gradient-to-r from-blue-500 to-teal-500 text-white font-bold py-3 px-6 rounded-full
+                                                               transition-all duration-300 hover:scale-105 hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-blue-300"
+                                                >
+                                                    Continue Reading
+                                                </a>
+                                            </div>
+                                        )}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
+            <style jsx global>{`
+                @import url('https://fonts.googleapis.com/css2?family=Amatic+SC:wght@400;700&family=Playfair+Display:wght@400;700&family=Inter:wght@400;500;700&display=swap');
+
+                body {
+                    font-family: 'Inter', sans-serif;
+                }
+                .font-['Amatic_SC'] {
+                    font-family: 'Amatic SC', cursive;
+                }
+                .font-['Playfair_Display'] {
+                    font-family: 'Playfair Display', serif;
+                }
+
+                .animate-spin-slow {
+                    animation: spin 6s linear infinite;
+                }
+                .animate-pulse-slow {
+                    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+                }
+                .animate-fade-in-up {
+                    animation: fade-in-up 1s ease-out forwards;
+                }
+
+                @keyframes spin {
+                    from {
+                        transform: rotate(0deg);
+                    }
+                    to {
+                        transform: rotate(360deg);
+                    }
+                }
+                @keyframes pulse {
+                    0%, 100% {
+                        opacity: 1;
+                    }
+                    50% {
+                        opacity: .5;
+                    }
+                }
+                @keyframes fade-in-up {
+                    from {
+                        opacity: 0;
+                        transform: translateY(20px);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: translateY(0);
+                    }
+                }
+            `}</style>
+        </div>
+    );
+};
+
+export default BookRecommendationApp;
+
+
